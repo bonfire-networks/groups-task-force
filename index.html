@@ -190,12 +190,12 @@
 		</section>
 		<section id="group-permissions">
 			<h3>Permissions within a group</h3>
-			<p>A group SHOULD declare which actors are permitted to perform which interactions, by carrying an <dfn>interaction policy</dfn> in the `interactionPolicy` property of its actor object. Each entry names an interaction and states who may perform it. An interaction is any action a policy names, whether it adds content to the group, acts on content already there, or acts on the group itself.</p>
+			<p>A group SHOULD publish information about which interactions it will accept, and from whom, by carrying an <dfn>interaction policy</dfn> in the `interactionPolicy` property of its actor object. Each entry names an interaction and states who the group will accept it from. The policy is published as a hint: it SHOULD describe what the group accepts, while deciding stays with the group actor itself (see <a href="#permission-reading"></a>). An interaction is any action a policy names, whether it adds content to the group, acts on content already there, or acts on the group itself.</p>
 			<p class="note">Interaction policies are already in use on individual posts rather than on groups, described in [[[gotosocial-interaction-controls]]], used by [[[FEP-044f]]] to obtain consent for quoting, and implemented on that basis by [[[mastodon-activitypub]]]. What this section adds is the group as a subject; the shape is unchanged.</p>
 			
 			<section id="permission-values">
 				<h4>Expressing an interaction policy</h4>
-				<p>Each key of `interactionPolicy` names an interaction, and MUST map to an object with the properties `automaticApproval` and `manualApproval`. Each property MUST hold ActivityPub identifiers of actors or collections of actors, or the value `as:Public`. Aliases and bare tokens MUST NOT be used.</p>
+				<p>Each key of `interactionPolicy` names an interaction, and MUST map to an object with the properties `automaticApproval` and `manualApproval`. Each property MUST hold ActivityPub identifiers of actors or collections of actors, or the value `as:Public`. Values are identifiers rather than names (e.g. `https://group.example/g/cooks/followers` instead of `followers`). Full IRIs SHOULD be used, since many consumers compare values as plain strings without JSON-LD processing.</p>
 				<figure>
 					<pre class="json">
 						{
@@ -211,9 +211,9 @@
 						}
 						}
 					</pre>
-					<figcaption>A group whose followers may join without asking, while anyone else may ask. An actor in neither list, were there one, could expect refusal. The interaction name is illustrative only: this specification defines the shape, and the names are proposed separately.</figcaption>
+					<figcaption>A group whose followers may join without asking, while anyone else may ask. An actor in neither list, were there one, might expect refusal. The interaction name is illustrative only: this specification defines the shape, and the names are proposed separately.</figcaption>
 				</figure>
-				<p>An interaction that is absent, `null` or `{}` is unconstrained by this policy.</p>
+				<p>An interaction that is absent or `null` is unconstrained by this policy.</p>
 				<p class="note">Absence is deliberately not a denial. Publishing a policy is best practice rather than a requirement, so a group that publishes none, or omits an interaction from one, keeps federating exactly as groups do today.</p>
 				<p>A group states that an interaction is not allowed by anyone by naming nobody but itself: `automaticApproval` holding at most the group's own actor, and `manualApproval` empty or absent. This is not the same as leaving the interaction out. An entry naming nobody says the group enforces the interaction and permits no one else, while an absent entry says nothing at all.</p>
 				<figure>
@@ -229,11 +229,38 @@
 					</pre>
 					<figcaption>A closed group. Only the group's own actor is named, so no one else may join and none may ask. Compare with omitting `canJoin` entirely, which tells a consumer nothing about joining.</figcaption>
 				</figure>
+				<p class="note">This reads the lists as complete, which an open-world reading of the data would not: nothing else being named does not, in RDF terms, mean no one else is permitted. The closed reading is deliberate: a policy is the group's own statement of its own rules, so what it lists is meant as the whole list rather than inferred from absence.</p>
 				<p class="note">A policy names actors and collections, so a group needs no vocabulary of roles to express one. A group that wants a grouping such as "safety team" or "trusted posters" publishes that collection and names it in the entries it should govern. A consumer can then check whether an actor is in the collection without knowing what the group means by the name.</p>
 			</section>
 			<section id="permission-scope">
 				<h4>Where a policy applies</h4>
 				<p>A policy on the group's actor object governs interactions with the group itself and with the objects it has announced or authored. A policy on an individual object governs interactions with that object, and MUST take precedence over the group's where both name the same interaction.</p>
+				<figure>
+					<pre class="json">
+						{
+						"type": "Group",
+						"id": "https://group.example/g/cooks",
+						"interactionPolicy": {
+						"canReply": {
+						"automaticApproval": ["https://group.example/g/cooks/members"]
+						}
+						}
+						}
+					</pre>
+					<pre class="json">
+						{
+						"type": "Note",
+						"id": "https://group.example/g/cooks/notes/rules",
+						"attributedTo": "https://group.example/g/cooks",
+						"interactionPolicy": {
+						"canReply": {
+						"automaticApproval": ["https://group.example/g/cooks/moderators"]
+						}
+						}
+						}
+					</pre>
+					<figcaption>Members may reply to anything the group carries, but this note (in this case authored by the group itself) allows replies from its moderators only. The note's own `canReply` takes precedence, so a member's reply to the rules is refused, while their replies elsewhere in the group are accepted.</figcaption>
+				</figure>
 				<p>An object that merely names a group in its `audience` asserts only its own author's claim, which does not by itself bring the object under the group's policy. A consumer MUST NOT treat such a claim as evidence that the object belongs to the group.</p>
 				<p>A policy governs who may act, not who may see. Naming an actor in one MUST NOT be read as granting it visibility of the group or of any object within the group, and an actor that cannot see an object MUST NOT be permitted to interact with it. Visibility remains determined by `to`, `cc` and `audience`.</p>
 				<figure>
@@ -250,7 +277,7 @@
 						}
 						}
 					</pre>
-					<figcaption>A note within the group, carrying its own policy for replies to it. Where the group also states `canReply`, this one governs replies to this note.</figcaption>
+					<figcaption>A note posted to the group, carrying its own policy for replies to it. Where the group's policy also names `canReply`, the note's own policy governs replies to this note.</figcaption>
 				</figure>
 			</section>
 			<section id="permission-terms">
@@ -276,23 +303,23 @@
 			<section id="permission-publishing">
 				<h4>Publishing a policy</h4>
 				<p>A group SHOULD serve an <a>interaction policy</a> with its actor object that reflects what it actually enforces. The policy it serves can be the rules its own server evaluates when an activity arrives, or a description of rules it holds separately.</p>
-				<p>Stating a permission indicates that the group implements permissions and enforces this one.</p>
-				<p>A group SHOULD therefore state every permission it enforces, including those whose value does not differ from the default.</p>
+				<p>Including an interaction in its policy indicates two things: that the group supports interaction policies, and that it enforces that interaction.</p>
+				<p>A group SHOULD therefore include every interaction it enforces, including those whose value does not differ from the default.</p>
 				<p class="note">Silence is ambiguous in a way that matters: a group stating nothing might place no restrictions, or might run software that has not implemented interaction policies. The two call for opposite handling, since there is no use in waiting on a decision from a server that will never make one. Writing out a permission, even at its default value, settles it.</p>
 			</section>
 			<section id="permission-reading">
 				<h4>Reading a policy</h4>
-				<p>To anyone other than the group publishing it, a policy is a declaration of intent. A client that understands one SHOULD use it to present only the actions a user is likely to be permitted to perform, and a server SHOULD use it to decide whether an attempt is worth making.</p>
-				<p>A server interacting with a remote group MUST NOT treat a permissive policy as a guarantee that the interaction will be accepted, and MUST NOT read an absent interaction as a denial.</p>
+				<p>To anyone other than the group publishing it, a policy is a declaration of intent. A client that understands one SHOULD use it to present only the actions a user is likely to be permitted to perform, and an actor SHOULD use it to decide whether an attempt is worth making.</p>
+				<p>An actor interacting with a remote group MUST NOT treat a permissive policy as a guarantee that the interaction will be accepted, and SHOULD NOT read an absent interaction as a denial.</p>
 				<p>A consumer that does not recognise an interaction SHOULD continue to apply the interactions it does recognise, rather than disregarding the policy as a whole.</p>
-				<p>Where a group publishes no policy at all, a consumer cannot tell whether it places no restrictions or does not implement permissions.</p>
-				<p>Where a group publishes a policy that omits a given interaction, the group implements permissions but does not enforce that interaction.</p>
+				<p>Where a group publishes no policy at all, a consumer cannot tell whether it places no restrictions or does not support interaction policies.</p>
+				<p>Where a group publishes a policy that omits a given interaction, the group supports interaction policies but does not describe that interaction as restricted.</p>
 				<p>In either case an actor can still attempt the interaction, as it would with any group that publishes no policy. Since the group has advertised no support for it, a consumer MUST NOT rely on it being recognised or accepted, and SHOULD NOT present it as having taken effect within the group until the group acts on it.</p>
 			</section>
 			<section id="permission-requesting">
 				<h4>Attempting an action</h4>
-				<p>An actor MUST attempt to perform an interaction by delivering the activity to the group's inbox. There is no separate step of asking first: the activity is the request, in either case.</p>
-				<p class="note">Interaction policies on individual posts do have a separate step, because there is no group to redistribute: the interacting actor distributes its own interaction, so it must obtain approval beforehand and attach it. A group instead distributes the interaction itself, on the interacting actor's behalf and under its own authority, which both performs the interaction and evidences that it was permitted.</p>
+				<p>An actor attempts an interaction by sending the activity to the group, usually by delivering it to the group's inbox. There is no separate step of asking first: the activity is the request, in either case.</p>
+				<p class="note">Whilst interaction policies on posts outside any group have a separate step (because there is no group to redistribute: the interacting actor distributes its own interaction, so it must obtain approval beforehand and attach it), a group instead distributes the interaction itself, on the interacting actor's behalf and under its own authority, which both performs the interaction and evidences that it was permitted. It also saves the round trips, since a group can reject an interaction simply by not distributing it.</p>
 				<p>What the policy tells the actor's client is how to describe the state while it waits. Presenting the interaction as pending is always correct, in either case, and a client MAY do only that. Where the actor is listed in `automaticApproval` a client MAY instead present it as having taken effect; where the actor is listed in `manualApproval` it SHOULD NOT, since a decision is pending and may never come.</p>
 				<p>Either presentation is provisional. The actual state follows from what the group does: an `Accept`, or the group acting on the interaction and publishing the result to its outbox.</p>
 				<p class="note">This is how a `Follow` of an actor with `manuallyApprovesFollowers` already behaves. The same activity is sent either way, and the difference the user sees is "Following" rather than "Requested".</p>
@@ -345,7 +372,7 @@
 						}
 						}
 					</pre>
-					<figcaption>Anyone may ask to join, and someone in this group's "greeters" collection decides. The deciding actor can a member of any collection(s) the group names, and need not be its "moderators" or "admins". Names are only illustrative.</figcaption>
+					<figcaption>Anyone may ask to join, and someone in this group's "greeters" collection decides. The deciding actor can be a member of any collection(s) the group names, and need not be its "moderators" or "admins". Names are only illustrative.</figcaption>
 				</figure>
 				<figure>
 					<pre class="json">
